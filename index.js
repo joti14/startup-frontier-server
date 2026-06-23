@@ -4,7 +4,7 @@ dotenv.config();
 const cors = require("cors");
 const app = express();
 const port = process.env.PORT;
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 app.use(cors());
 app.use(express.json());
@@ -31,6 +31,12 @@ async function run() {
     const paymentCollection = db.collection("payments");
 
     // Founder related APIs
+    app.get("/api/founder/:email", async (req, res) => {
+      const { email } = req.params;
+      const result = await startupsCollection.findOne({ founderEmail: email });
+      res.send(result);
+    });
+
     app.post("/api/founder", async (req, res) => {
       const {
         startupName,
@@ -53,7 +59,7 @@ async function run() {
       };
 
       const result = await startupsCollection.insertOne(addData);
-      return result;
+      res.json(result);
     });
 
     console.log(
