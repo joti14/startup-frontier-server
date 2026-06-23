@@ -62,6 +62,39 @@ async function run() {
       res.json(result);
     });
 
+    app.patch("/api/founder/:id", async (req, res) => {
+      const { id } = req.params;
+      const {
+        startupName,
+        logoUrl,
+        industry,
+        description,
+        fundingStage,
+        founderEmail,
+      } = req.body;
+
+      const updateData = {
+        startupName,
+        logoUrl,
+        industry,
+        description,
+        fundingStage,
+        founderEmail,
+        createdAt: new Date(),
+        status: "active",
+      };
+
+      const result = await startupsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: {
+            ...updateData,
+          },
+        },
+      );
+      res.json(result);
+    });
+
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",
     );
