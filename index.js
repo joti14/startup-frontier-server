@@ -118,6 +118,76 @@ async function run() {
       }
     });
 
+    // Add an opportunity
+    app.post("/api/opportunities", async (req, res) => {
+      const data = req.body;
+      const result = await opportunitiesCollection.insertOne({ ...data });
+      res.json(result);
+    });
+
+    // Get latest opportunities (with search and filters)
+    app.get("/api/opportunities", async (req, res) => {
+      const { limit, search, workType, industry } = req.query;
+      const filter = {};
+
+      if (search) {
+        filter.$or = [
+          { roleTitle: { $regex: search, $options: "i" } },
+          { requiredSkills: { $regex: search, $options: "i" } },
+        ];
+      }
+
+      if (workType) {
+        const workTypes = workType.split(",");
+        filter.workType = { $in: workTypes };
+      }
+
+      if (industry) {
+        const industries = industry.split(",");
+        filter.industry = { $in: industries };
+      }
+
+      let query = opportunitiesCollection.find(filter).sort({ _id: -1 });
+      if (limit) query = query.limit(parseInt(limit));
+      const result = await query.toArray();
+      res.json(result);
+    });
+
+    // Get opportunities by founder email
+    app.get("/api/opportunities/:email", async (req, res) => {
+      const { email } = req.params;
+      const result = await opportunitiesCollection
+        .find({ founderEmail: email })
+        .toArray();
+      res.json(result);
+    });
+
+    // Update an opportunity
+    app.patch("/api/opportunities/:id", async (req, res) => {
+      const { id } = req.params;
+      const data = req.body;
+      try {
+        const result = await opportunitiesCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { ...data } }
+        );
+        res.json(result);
+      } catch (err) {
+        res.status(400).json({ error: "Invalid ID" });
+      }
+    });
+
+    // Delete an opportunity
+    app.delete("/api/opportunities/:id", async (req, res) => {
+      const { id } = req.params;
+      try {
+        const result = await opportunitiesCollection.deleteOne({ _id: new ObjectId(id) });
+        res.json(result);
+      } catch (err) {
+        res.status(400).json({ error: "Invalid ID" });
+      }
+    });
+
 
     // Submit an application
     app.post("/api/applications", async (req, res) => {
