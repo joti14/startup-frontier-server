@@ -30,6 +30,16 @@ async function run() {
     const applicationsCollection = db.collection("applications");
     const paymentCollection = db.collection("payments");
 
+    // featured startups
+    app.get("/api/startups", async (req, res) => {
+      const limit = req.query.limit ? parseInt(req.query.limit) : 0;
+      const filter = req.query.featured === "true" ? { featured: true } : {};
+      let query = startupsCollection.find(filter).sort({ createdAt: -1 });
+      if (limit > 0) query = query.limit(limit);
+      const result = await query.toArray();
+      res.json(result);
+    });
+
     // Founder related APIs
     app.get("/api/founder/:email", async (req, res) => {
       const { email } = req.params;
