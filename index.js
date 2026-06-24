@@ -95,6 +95,15 @@ async function run() {
       res.json(result);
     });
 
+    // add oportunity
+    app.post('/api/opportunities', async (req, res) => {
+        const data = req.body;
+        const result = await opportunitiesCollection.insertOne({
+            ...data,
+        });
+        res.send(result);
+    })
+
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",
     );
