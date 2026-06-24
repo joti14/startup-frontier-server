@@ -18,22 +18,18 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+
 async function run() {
   try {
-    // Connect the client to the server	(optional starting in v4.7)
-    // await client.connect();
-    // Send a ping to confirm a successful connection
-    // await client.db("admin").command({ ping: 1 });
     const db = client.db("startup-frontier-db");
     const startupsCollection = db.collection("startups");
     const opportunitiesCollection = db.collection("opportunities");
     const applicationsCollection = db.collection("applications");
     const paymentCollection = db.collection("payments");
 
-    // featured startups, filter and search
+    // Get all startups with optional filters
     app.get("/api/startups", async (req, res) => {
       const { featured, limit, search, industry, fundingStage } = req.query;
-
       const filter = {};
       if (featured === "true") filter.featured = true;
       if (industry) filter.industry = industry;
@@ -45,30 +41,33 @@ async function run() {
           { industry: { $regex: search, $options: "i" } },
         ];
       }
-
       let query = startupsCollection.find(filter).sort({ createdAt: -1 });
       if (limit) query = query.limit(parseInt(limit));
       const result = await query.toArray();
       res.json(result);
     });
 
-    // Founder related APIs
+    // Get a single startup by ID
+    app.get("/api/startups/:id", async (req, res) => {
+      const { id } = req.params;
+      try {
+        const result = await startupsCollection.findOne({ _id: new ObjectId(id) });
+        res.json(result);
+      } catch (err) {
+        res.status(400).json({ error: "Invalid ID" });
+      }
+    });
+
+    // Get founder's startup by email
     app.get("/api/founder/:email", async (req, res) => {
       const { email } = req.params;
       const result = await startupsCollection.findOne({ founderEmail: email });
-      res.send(result);
+      res.json(result);
     });
 
+    // Create a startup
     app.post("/api/founder", async (req, res) => {
-      const {
-        startupName,
-        logoUrl,
-        industry,
-        description,
-        fundingStage,
-        founderEmail,
-      } = req.body;
-
+      const { startupName, logoUrl, industry, description, fundingStage, founderEmail, teamSize } = req.body;
       const addData = {
         startupName,
         logoUrl,
@@ -76,25 +75,18 @@ async function run() {
         description,
         fundingStage,
         founderEmail,
+        teamSize: teamSize || null,
         createdAt: new Date(),
-        status: "active",
+        status: "pending",
       };
-
       const result = await startupsCollection.insertOne(addData);
       res.json(result);
     });
 
+    // Update a startup
     app.patch("/api/founder/:id", async (req, res) => {
       const { id } = req.params;
-      const {
-        startupName,
-        logoUrl,
-        industry,
-        description,
-        fundingStage,
-        founderEmail,
-      } = req.body;
-
+      const { startupName, logoUrl, industry, description, fundingStage, founderEmail, teamSize } = req.body;
       const updateData = {
         startupName,
         logoUrl,
@@ -102,79 +94,95 @@ async function run() {
         description,
         fundingStage,
         founderEmail,
-        createdAt: new Date(),
-        status: "active",
+        teamSize: teamSize || null,
       };
-
-      const result = await startupsCollection.updateOne(
-        { _id: new ObjectId(id) },
-        {
-          $set: {
-            ...updateData,
-          },
-        },
-      );
-      res.json(result);
+      try {
+        const result = await startupsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updateData }
+        );
+        res.json(result);
+      } catch (err) {
+        res.status(400).json({ error: "Invalid ID" });
+      }
     });
 
+    // Delete a startup
     app.delete("/api/founder/:id", async (req, res) => {
       const { id } = req.params;
-      const result = await startupsCollection.deleteOne({
-        _id: new ObjectId(id),
-      });
-      res.json(result);
+      try {
+        const result = await startupsCollection.deleteOne({ _id: new ObjectId(id) });
+        res.json(result);
+      } catch (err) {
+        res.status(400).json({ error: "Invalid ID" });
+      }
     });
 
-    // add oportunity
-    app.post("/api/opportunities", async (req, res) => {
+
+    // Submit an application
+    app.post("/api/applications", async (req, res) => {
       const data = req.body;
-      const result = await opportunitiesCollection.insertOne({
+      console.log("[POST /api/applications] Received:", data);
+      const result = await applicationsCollection.insertOne({
         ...data,
+        createdAt: new Date(),
+        status: "pending",
       });
-      res.send(result);
+      console.log("[POST /api/applications] Inserted:", result.insertedId);
+      res.json(result);
     });
 
-    // manage opportunities
-    app.get("/api/opportunities/:email", async (req, res) => {
+    // Get all applications for a founder (by founder email)
+    app.get("/api/applications/founder/:email", async (req, res) => {
       const { email } = req.params;
-      const result = await opportunitiesCollection
+      console.log("[GET /api/applications/founder] email:", email);
+      const result = await applicationsCollection
         .find({ founderEmail: email })
+        .sort({ createdAt: -1 })
         .toArray();
+      console.log("[GET /api/applications/founder] found:", result.length);
       res.json(result);
     });
 
-    app.patch("/api/opportunities/:id", async (req, res) => {
+    // Get all applications for an applicant (by applicant email)
+    app.get("/api/applications/applicant/:email", async (req, res) => {
+      const { email } = req.params;
+      console.log("[GET /api/applications/applicant] email:", email);
+      const result = await applicationsCollection
+        .find({ applicantEmail: email })
+        .sort({ createdAt: -1 })
+        .toArray();
+      console.log("[GET /api/applications/applicant] found:", result.length);
+      res.json(result);
+    });
+
+    // Update application status (Accept / Reject)
+    app.patch("/api/applications/:id", async (req, res) => {
       const { id } = req.params;
-      const data = req.body;
-      const result = await opportunitiesCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { ...data } },
-      );
-      res.json(result);
+      const { status } = req.body;
+      try {
+        const result = await applicationsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status } }
+        );
+        res.json(result);
+      } catch (err) {
+        res.status(400).json({ error: "Invalid ID" });
+      }
     });
 
-    app.delete("/api/opportunities/:id", async (req, res) => {
-      const { id } = req.params;
-      const result = await opportunitiesCollection.deleteOne({
-        _id: new ObjectId(id),
-      });
-      res.json(result);
-    });
-
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!",
-    );
+    console.log("Connected to MongoDB successfully!");
   } finally {
-    // Ensures that the client will close when you finish/error
     // await client.close();
   }
 }
+
 run().catch(console.dir);
 
 app.get("/", (req, res) => {
-  res.send("Hello World!");
+  res.send("Startup Frontier API is running!");
 });
 
 app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
+  console.log(`Server listening on port ${port}`);
 });
