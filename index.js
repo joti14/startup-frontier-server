@@ -30,12 +30,24 @@ async function run() {
     const applicationsCollection = db.collection("applications");
     const paymentCollection = db.collection("payments");
 
-    // featured startups
+    // featured startups, filter and search
     app.get("/api/startups", async (req, res) => {
-      const limit = req.query.limit ? parseInt(req.query.limit) : 0;
-      const filter = req.query.featured === "true" ? { featured: true } : {};
+      const { featured, limit, search, industry, fundingStage } = req.query;
+
+      const filter = {};
+      if (featured === "true") filter.featured = true;
+      if (industry) filter.industry = industry;
+      if (fundingStage) filter.fundingStage = fundingStage;
+      if (search) {
+        filter.$or = [
+          { startupName: { $regex: search, $options: "i" } },
+          { description: { $regex: search, $options: "i" } },
+          { industry: { $regex: search, $options: "i" } },
+        ];
+      }
+
       let query = startupsCollection.find(filter).sort({ createdAt: -1 });
-      if (limit > 0) query = query.limit(limit);
+      if (limit) query = query.limit(parseInt(limit));
       const result = await query.toArray();
       res.json(result);
     });
