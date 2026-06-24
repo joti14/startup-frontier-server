@@ -104,6 +104,29 @@ async function run() {
         res.send(result);
     })
 
+    // manage opportunities
+    app.get("/api/opportunities/:email", async (req, res) => {
+      const { email } = req.params;
+      const result = await opportunitiesCollection.find({ founderEmail: email }).toArray();
+      res.json(result);
+    });
+
+    app.patch("/api/opportunities/:id", async (req, res) => {
+      const { id } = req.params;
+      const data = req.body;
+      const result = await opportunitiesCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { ...data } }
+      );
+      res.json(result);
+    });
+
+    app.delete("/api/opportunities/:id", async (req, res) => {
+      const { id } = req.params;
+      const result = await opportunitiesCollection.deleteOne({ _id: new ObjectId(id) });
+      res.json(result);
+    });
+
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",
     );
