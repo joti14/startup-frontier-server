@@ -117,19 +117,29 @@ async function run() {
       res.json(result);
     });
 
+    app.delete("/api/founder/:id", async (req, res) => {
+      const { id } = req.params;
+      const result = await startupsCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.json(result);
+    });
+
     // add oportunity
-    app.post('/api/opportunities', async (req, res) => {
-        const data = req.body;
-        const result = await opportunitiesCollection.insertOne({
-            ...data,
-        });
-        res.send(result);
-    })
+    app.post("/api/opportunities", async (req, res) => {
+      const data = req.body;
+      const result = await opportunitiesCollection.insertOne({
+        ...data,
+      });
+      res.send(result);
+    });
 
     // manage opportunities
     app.get("/api/opportunities/:email", async (req, res) => {
       const { email } = req.params;
-      const result = await opportunitiesCollection.find({ founderEmail: email }).toArray();
+      const result = await opportunitiesCollection
+        .find({ founderEmail: email })
+        .toArray();
       res.json(result);
     });
 
@@ -138,14 +148,16 @@ async function run() {
       const data = req.body;
       const result = await opportunitiesCollection.updateOne(
         { _id: new ObjectId(id) },
-        { $set: { ...data } }
+        { $set: { ...data } },
       );
       res.json(result);
     });
 
     app.delete("/api/opportunities/:id", async (req, res) => {
       const { id } = req.params;
-      const result = await opportunitiesCollection.deleteOne({ _id: new ObjectId(id) });
+      const result = await opportunitiesCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
       res.json(result);
     });
 
