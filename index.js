@@ -365,6 +365,26 @@ async function run() {
       }
     });
 
+    // Get user profile by email
+    app.get("/api/users/profile/:email", async (req, res) => {
+      const { email } = req.params;
+      const user = await usersCollection.findOne({ email }, { projection: { name: 1, email: 1, image: 1, skills: 1, bio: 1 } });
+      res.json(user);
+    });
+
+    // Update user profile (name, image, skills, bio)
+    app.patch("/api/users/profile/:email", async (req, res) => {
+      const { email } = req.params;
+      const { name, image, skills, bio } = req.body;
+      const updateData = {};
+      if (name !== undefined) updateData.name = name;
+      if (image !== undefined) updateData.image = image;
+      if (skills !== undefined) updateData.skills = skills;
+      if (bio !== undefined) updateData.bio = bio;
+      const result = await usersCollection.updateOne({ email }, { $set: updateData });
+      res.json(result);
+    });
+
     console.log("Connected to MongoDB successfully!");
   } finally {
     // await client.close();
