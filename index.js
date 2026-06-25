@@ -32,8 +32,6 @@ async function run() {
     // Get all startups with filters
     app.get("/api/startups", async (req, res) => {
       const { featured, limit, search, industry, fundingStage } = req.query;
-      const collection =
-        featured === "true" ? featuredStartupsCollection : startupsCollection;
       const filter = {};
       if (industry) filter.industry = industry;
       if (fundingStage) filter.fundingStage = fundingStage;
@@ -44,9 +42,24 @@ async function run() {
           { industry: { $regex: search, $options: "i" } },
         ];
       }
-      let query = collection.find(filter).sort({ createdAt: -1 });
-      if (limit) query = query.limit(parseInt(limit));
-      const result = await query.toArray();
+
+      if (featured === "true") {
+        let query = featuredStartupsCollection
+          .find(filter)
+          .sort({ createdAt: -1 });
+        if (limit) query = query.limit(parseInt(limit));
+        return res.json(await query.toArray());
+      }
+
+      const [real, showcase] = await Promise.all([
+        startupsCollection.find(filter).sort({ createdAt: -1 }).toArray(),
+        featuredStartupsCollection
+          .find(filter)
+          .sort({ createdAt: -1 })
+          .toArray(),
+      ]);
+      let result = [...real, ...showcase];
+      if (limit) result = result.slice(0, parseInt(limit));
       res.json(result);
     });
 
@@ -174,12 +187,10 @@ async function run() {
         founderEmail: data?.founderEmail,
       });
       if (!user?.isPremium && count >= 3) {
-        return res
-          .status(403)
-          .json({
-            message:
-              "Your free limit is over. Upgrade to premium to post more opportunities.",
-          });
+        return res.status(403).json({
+          message:
+            "Your free limit is over. Upgrade to premium to post more opportunities.",
+        });
       }
       const result = await opportunitiesCollection.insertOne({ ...data });
       res.json(result);
@@ -300,6 +311,19 @@ async function run() {
       } catch (err) {
         res.status(400).json({ error: "Invalid ID" });
       }
+    });
+
+    app.patch("/api/users/upgrade-premium", async (req, res) => {
+      const { email } = req.params;
+      const result = await usersCollection.updateOne(
+        { email },
+        {
+          $set: {
+            isPremium: true,
+          },
+        },
+      );
+      res.json(result);
     });
 
     console.log("Connected to MongoDB successfully!");
