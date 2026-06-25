@@ -319,7 +319,10 @@ async function run() {
 
     app.patch("/api/admin/users/block/:id", verifyToken, verifyAdmin, async (req, res) => {
       try {
-        res.json(await usersCollection.updateOne({ _id: new ObjectId(req.params.id) }, { $set: { isBlocked: true } }));
+        const id = req.params.id;
+        let query;
+        try { query = { _id: new ObjectId(id) }; } catch { query = { _id: id }; }
+        res.json(await usersCollection.updateOne(query, { $set: { isBlocked: true } }));
       } catch (err) {
         res.status(400).json({ error: err.message });
       }
@@ -327,7 +330,10 @@ async function run() {
 
     app.patch("/api/admin/users/unblock/:id", verifyToken, verifyAdmin, async (req, res) => {
       try {
-        res.json(await usersCollection.updateOne({ _id: new ObjectId(req.params.id) }, { $set: { isBlocked: false } }));
+        const id = req.params.id;
+        let query;
+        try { query = { _id: new ObjectId(id) }; } catch { query = { _id: id }; }
+        res.json(await usersCollection.updateOne(query, { $set: { isBlocked: false } }));
       } catch (err) {
         res.status(400).json({ error: err.message });
       }
