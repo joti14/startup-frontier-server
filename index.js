@@ -313,17 +313,37 @@ async function run() {
       }
     });
 
-    app.patch("/api/users/upgrade-premium", async (req, res) => {
-      const { email } = req.params;
-      const result = await usersCollection.updateOne(
-        { email },
-        {
-          $set: {
-            isPremium: true,
-          },
-        },
-      );
-      res.json(result);
+    app.patch("/api/users/upgrade-premium/:email", async (req, res) => {
+      try {
+        const { email } = req.params;
+        const { transactionId, paymentStatus, paymentType, amount, userEmail } = req.body;
+
+        console.log("[upgrade-premium] email:", email, "body:", req.body);
+
+        // Update user isPremium
+        const userUpdate = await usersCollection.updateOne(
+          { email },
+          { $set: { isPremium: true, premiumSince: new Date() } }
+        );
+
+        console.log("[upgrade-premium] user matched:", userUpdate.matchedCount, "modified:", userUpdate.modifiedCount);
+
+        // Save to payments collection
+        const paymentRecord = {
+          userEmail: userEmail || email,
+          transactionId,
+          paymentStatus,
+          paymentType,
+          amount,
+          paidAt: new Date(),
+        };
+        await paymentCollection.insertOne(paymentRecord);
+
+        res.json({ success: true, userUpdate, paymentRecord });
+      } catch (err) {
+        console.error("[upgrade-premium] error:", err);
+        res.status(500).json({ error: err.message });
+      }
     });
 
     console.log("Connected to MongoDB successfully!");
