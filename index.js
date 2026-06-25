@@ -365,6 +365,103 @@ async function run() {
       }
     });
 
+    // Admin overview stats
+    app.get("/api/admin/stats", async (req, res) => {
+      try {
+        const [totalUsers, totalStartups, totalOpportunities, payments] = await Promise.all([
+          usersCollection.countDocuments(),
+          startupsCollection.countDocuments(),
+          opportunitiesCollection.countDocuments(),
+          paymentCollection.find({}, { projection: { amount: 1 } }).toArray(),
+        ]);
+        const totalRevenue = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+        res.json({ totalUsers, totalStartups, totalOpportunities, totalRevenue });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // Admin: get all users
+    app.get("/api/admin/users", async (req, res) => {
+      try {
+        const users = await usersCollection.find({}, {
+          projection: { name: 1, email: 1, image: 1, role: 1, isPremium: 1, createdAt: 1 }
+        }).sort({ createdAt: -1 }).toArray();
+        res.json(users);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // Admin: block user
+    app.patch("/api/admin/users/block/:id", async (req, res) => {
+      try {
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(req.params.id) },
+          { $set: { isBlocked: true } }
+        );
+        res.json(result);
+      } catch (err) {
+        res.status(400).json({ error: err.message });
+      }
+    });
+
+    // Admin: unblock user
+    app.patch("/api/admin/users/unblock/:id", async (req, res) => {
+      try {
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(req.params.id) },
+          { $set: { isBlocked: false } }
+        );
+        res.json(result);
+      } catch (err) {
+        res.status(400).json({ error: err.message });
+      }
+    });
+
+    // Admin: get all startups (real collection only)
+    app.get("/api/admin/startups", async (req, res) => {
+      try {
+        const startups = await startupsCollection.find({}).sort({ createdAt: -1 }).toArray();
+        res.json(startups);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // Admin: approve startup
+    app.patch("/api/admin/startups/approve/:id", async (req, res) => {
+      try {
+        const result = await startupsCollection.updateOne(
+          { _id: new ObjectId(req.params.id) },
+          { $set: { approved: true } }
+        );
+        res.json(result);
+      } catch (err) {
+        res.status(400).json({ error: err.message });
+      }
+    });
+
+    // Admin: remove startup
+    app.delete("/api/admin/startups/:id", async (req, res) => {
+      try {
+        const result = await startupsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+        res.json(result);
+      } catch (err) {
+        res.status(400).json({ error: err.message });
+      }
+    });
+
+    // Admin: get all transactions
+    app.get("/api/admin/transactions", async (req, res) => {
+      try {
+        const transactions = await paymentCollection.find({}).sort({ paidAt: -1 }).toArray();
+        res.json(transactions);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
     // Get user profile by email
     app.get("/api/users/profile/:email", async (req, res) => {
       const { email } = req.params;
