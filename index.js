@@ -198,7 +198,7 @@ async function run() {
 
     // Get latest opportunities (with search and filters)
     app.get("/api/opportunities", async (req, res) => {
-      const { limit, search, workType, industry } = req.query;
+      const { search, workType, industry, page = 1, limit = 9 } = req.query;
       const filter = {};
 
       if (search) {
@@ -218,10 +218,16 @@ async function run() {
         filter.industry = { $in: industries };
       }
 
-      let query = opportunitiesCollection.find(filter).sort({ _id: -1 });
-      if (limit) query = query.limit(parseInt(limit));
-      const result = await query.toArray();
-      res.json(result);
+      const pageNum = Math.max(1, parseInt(page));
+      const limitNum = Math.max(1, parseInt(limit));
+      const skip = (pageNum - 1) * limitNum;
+
+      const [data, total] = await Promise.all([
+        opportunitiesCollection.find(filter).sort({ _id: -1 }).skip(skip).limit(limitNum).toArray(),
+        opportunitiesCollection.countDocuments(filter),
+      ]);
+
+      res.json({ data, total, page: pageNum, totalPages: Math.ceil(total / limitNum) });
     });
 
     // Get a single opportunity by ID for collaborator
