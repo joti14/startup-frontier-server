@@ -28,7 +28,7 @@ const client = new MongoClient(uri, {
 
 // ─── JWT MIDDLEWARE ───────────────────────────────────────────────────────────
 const verifyToken = (req, res, next) => {
-  const token = req.cookies?.token;
+  const token = req.cookies?.token || req.headers?.authorization?.replace("Bearer ", "");
   if (!token) return res.status(401).json({ message: "Unauthorized: no token" });
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
@@ -65,7 +65,7 @@ async function run() {
         sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
-      res.json({ success: true });
+      res.json({ success: true, token });
     });
 
     // Clear JWT cookie on logout
