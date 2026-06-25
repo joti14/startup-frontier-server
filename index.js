@@ -239,6 +239,9 @@ async function run() {
 
     // Applications: submit
     app.post("/api/applications", verifyToken, async (req, res) => {
+      if (req.user?.role === "founder" || req.user?.role === "admin") {
+        return res.status(403).json({ message: "Only collaborators can apply to opportunities." });
+      }
       res.json(await applicationsCollection.insertOne({ ...req.body, createdAt: new Date(), status: "pending" }));
     });
 
