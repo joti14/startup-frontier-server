@@ -224,6 +224,19 @@ async function run() {
       res.json(result);
     });
 
+    // Get a single opportunity by ID for collaborator
+    app.get("/api/opportunities/detail/:id", async (req, res) => {
+      const { id } = req.params;
+      try {
+        const result = await opportunitiesCollection.findOne({
+          _id: new ObjectId(id),
+        });
+        res.json(result);
+      } catch (err) {
+        res.status(400).json({ error: "Invalid ID" });
+      }
+    });
+
     // Get opportunities by founder email
     app.get("/api/opportunities/:email", async (req, res) => {
       const { email } = req.params;
@@ -316,17 +329,23 @@ async function run() {
     app.patch("/api/users/upgrade-premium/:email", async (req, res) => {
       try {
         const { email } = req.params;
-        const { transactionId, paymentStatus, paymentType, amount, userEmail } = req.body;
+        const { transactionId, paymentStatus, paymentType, amount, userEmail } =
+          req.body;
 
         console.log("[upgrade-premium] email:", email, "body:", req.body);
 
         // Update user isPremium
         const userUpdate = await usersCollection.updateOne(
           { email },
-          { $set: { isPremium: true, premiumSince: new Date() } }
+          { $set: { isPremium: true, premiumSince: new Date() } },
         );
 
-        console.log("[upgrade-premium] user matched:", userUpdate.matchedCount, "modified:", userUpdate.modifiedCount);
+        console.log(
+          "[upgrade-premium] user matched:",
+          userUpdate.matchedCount,
+          "modified:",
+          userUpdate.modifiedCount,
+        );
 
         // Save to payments collection
         const paymentRecord = {
