@@ -2,14 +2,21 @@ const express = require("express");
 const dotenv = require("dotenv");
 dotenv.config();
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
+const cookieParser = require("cookie-parser");
 const app = express();
 const port = process.env.PORT;
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.CLIENT_URL || "http://localhost:3000",
+  credentials: true,
+}));
 app.use(express.json());
+app.use(cookieParser());
 
 const uri = process.env.MONGODB_URI;
+const JWT_SECRET = process.env.JWT_SECRET;
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -18,6 +25,24 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+
+// ─── JWT MIDDLEWARE ───────────────────────────────────────────────────────────
+const verifyToken = (req, res, next) => {
+  const token = req.cookies?.token;
+  if (!token) return res.status(401).json({ message: "Unauthorized: no token" });
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch {
+    return res.status(401).json({ message: "Unauthorized: invalid token" });
+  }
+};
+
+const verifyAdmin = (req, res, next) => {
+  if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden: admin only" });
+  next();
+};
 
 async function run() {
   try {
@@ -28,6 +53,32 @@ async function run() {
     const usersCollection = db.collection("user");
     const applicationsCollection = db.collection("applications");
     const paymentCollection = db.collection("payments");
+
+    // Called from the client after Better Auth login succeeds
+    app.post("/api/auth/token", (req, res) => {
+      const { email, role } = req.body;
+      if (!email) return res.status(400).json({ message: "email required" });
+      const token = jwt.sign({ email, role }, JWT_SECRET, { expiresIn: "7d" });
+      res.cookie("token", token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
+      res.json({ success: true });
+    });
+
+    // Clear JWT cookie on logout
+    app.post("/api/auth/logout", (req, res) => {
+      res.clearCookie("token", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      });
+      res.json({ success: true });
+    });
+
+    // PUBLIC ROUTES
 
     // Get all startups with filters
     app.get("/api/startups", async (req, res) => {
@@ -42,337 +93,208 @@ async function run() {
           { industry: { $regex: search, $options: "i" } },
         ];
       }
-
       if (featured === "true") {
-        let query = featuredStartupsCollection
-          .find(filter)
-          .sort({ createdAt: -1 });
+        let query = featuredStartupsCollection.find(filter).sort({ createdAt: -1 });
         if (limit) query = query.limit(parseInt(limit));
         return res.json(await query.toArray());
       }
-
       const [real, showcase] = await Promise.all([
         startupsCollection.find(filter).sort({ createdAt: -1 }).toArray(),
-        featuredStartupsCollection
-          .find(filter)
-          .sort({ createdAt: -1 })
-          .toArray(),
+        featuredStartupsCollection.find(filter).sort({ createdAt: -1 }).toArray(),
       ]);
       let result = [...real, ...showcase];
       if (limit) result = result.slice(0, parseInt(limit));
       res.json(result);
     });
 
-    // Get all featured startups (separate collection)
     app.get("/api/featured-startups", async (req, res) => {
       const { limit } = req.query;
       let query = featuredStartupsCollection.find({}).sort({ createdAt: -1 });
       if (limit) query = query.limit(parseInt(limit));
-      const result = await query.toArray();
-      res.json(result);
+      res.json(await query.toArray());
     });
 
-    // Get a single startup by ID (checks real startups first, then featured)
     app.get("/api/startups/:id", async (req, res) => {
-      const { id } = req.params;
       try {
-        const oid = new ObjectId(id);
+        const oid = new ObjectId(req.params.id);
         let result = await startupsCollection.findOne({ _id: oid });
-        if (!result)
-          result = await featuredStartupsCollection.findOne({ _id: oid });
+        if (!result) result = await featuredStartupsCollection.findOne({ _id: oid });
         res.json(result);
-      } catch (err) {
+      } catch {
         res.status(400).json({ error: "Invalid ID" });
       }
     });
 
-    // Get founder's startup by email
-    app.get("/api/founder/:email", async (req, res) => {
-      const { email } = req.params;
-      console.log("[GET /api/founder] querying founderEmail:", email);
-      const result = await startupsCollection.findOne({ founderEmail: email });
-      console.log("[GET /api/founder] result:", result ? result._id : "null");
-      res.json(result);
-    });
-
-    // Create a startup
-    app.post("/api/founder", async (req, res) => {
-      try {
-        console.log("[POST /api/founder] body:", req.body);
-        const {
-          startupName,
-          logoUrl,
-          industry,
-          description,
-          fundingStage,
-          founderEmail,
-          teamSize,
-          teamSizeNeeded,
-        } = req.body;
-        if (!founderEmail) {
-          return res.status(400).json({ error: "founderEmail is required" });
-        }
-        const addData = {
-          startupName,
-          logoUrl,
-          industry,
-          description,
-          fundingStage,
-          founderEmail,
-          teamSizeNeeded: teamSizeNeeded || teamSize || null,
-          createdAt: new Date(),
-          status: "pending",
-        };
-        console.log("[POST /api/founder] inserting:", addData);
-        const result = await startupsCollection.insertOne(addData);
-        console.log("[POST /api/founder] inserted:", result.insertedId);
-        res.json(result);
-      } catch (err) {
-        console.error("[POST /api/founder] error:", err);
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-    // Update a startup
-    app.patch("/api/founder/:id", async (req, res) => {
-      const { id } = req.params;
-      const {
-        startupName,
-        logoUrl,
-        industry,
-        description,
-        fundingStage,
-        founderEmail,
-        teamSize,
-        teamSizeNeeded,
-      } = req.body;
-      const updateData = {
-        startupName,
-        logoUrl,
-        industry,
-        description,
-        fundingStage,
-        founderEmail,
-        teamSizeNeeded: teamSizeNeeded || teamSize || null,
-      };
-      try {
-        const result = await startupsCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: updateData },
-        );
-        res.json(result);
-      } catch (err) {
-        res.status(400).json({ error: "Invalid ID" });
-      }
-    });
-
-    // Delete a startup
-    app.delete("/api/founder/:id", async (req, res) => {
-      const { id } = req.params;
-      try {
-        const result = await startupsCollection.deleteOne({
-          _id: new ObjectId(id),
-        });
-        res.json(result);
-      } catch (err) {
-        res.status(400).json({ error: "Invalid ID" });
-      }
-    });
-
-    // Add an opportunity (free limit: 3 per founder)
-    app.post("/api/opportunities", async (req, res) => {
-      const data = req.body;
-      const user = await usersCollection.findOne({ email: data?.founderEmail });
-      const count = await opportunitiesCollection.countDocuments({
-        founderEmail: data?.founderEmail,
-      });
-      if (!user?.isPremium && count >= 3) {
-        return res.status(403).json({
-          message:
-            "Your free limit is over. Upgrade to premium to post more opportunities.",
-        });
-      }
-      const result = await opportunitiesCollection.insertOne({ ...data });
-      res.json(result);
-    });
-
-    // Get latest opportunities (with search and filters)
+    // Browse opportunities (public — needed for home page + collaborator browse)
     app.get("/api/opportunities", async (req, res) => {
       const { search, workType, industry, page = 1, limit = 9 } = req.query;
       const filter = {};
-
       if (search) {
         filter.$or = [
           { roleTitle: { $regex: search, $options: "i" } },
           { requiredSkills: { $regex: search, $options: "i" } },
         ];
       }
-
-      if (workType) {
-        const workTypes = workType.split(",");
-        filter.workType = { $in: workTypes };
-      }
-
-      if (industry) {
-        const industries = industry.split(",");
-        filter.industry = { $in: industries };
-      }
+      if (workType) filter.workType = { $in: workType.split(",") };
+      if (industry) filter.industry = { $in: industry.split(",") };
 
       const pageNum = Math.max(1, parseInt(page));
       const limitNum = Math.max(1, parseInt(limit));
-      const skip = (pageNum - 1) * limitNum;
-
       const [data, total] = await Promise.all([
-        opportunitiesCollection.find(filter).sort({ _id: -1 }).skip(skip).limit(limitNum).toArray(),
+        opportunitiesCollection.find(filter).sort({ _id: -1 }).skip((pageNum - 1) * limitNum).limit(limitNum).toArray(),
         opportunitiesCollection.countDocuments(filter),
       ]);
-
       res.json({ data, total, page: pageNum, totalPages: Math.ceil(total / limitNum) });
     });
 
-    // Get a single opportunity by ID for collaborator
     app.get("/api/opportunities/detail/:id", async (req, res) => {
-      const { id } = req.params;
       try {
-        const result = await opportunitiesCollection.findOne({
-          _id: new ObjectId(id),
+        res.json(await opportunitiesCollection.findOne({ _id: new ObjectId(req.params.id) }));
+      } catch {
+        res.status(400).json({ error: "Invalid ID" });
+      }
+    });
+
+    // PROTECTED ROUTES with JWT
+
+    // Founder: get startup by email
+    app.get("/api/founder/:email", async (req, res) => {
+      console.log("[GET /api/founder] querying founderEmail:", req.params.email);
+      const result = await startupsCollection.findOne({ founderEmail: req.params.email });
+      res.json(result);
+    });
+
+    // Founder: create startup
+    app.post("/api/founder", verifyToken, async (req, res) => {
+      try {
+        const { startupName, logoUrl, industry, description, fundingStage, founderEmail, teamSize, teamSizeNeeded } = req.body;
+        if (!founderEmail) return res.status(400).json({ error: "founderEmail is required" });
+        const result = await startupsCollection.insertOne({
+          startupName, logoUrl, industry, description, fundingStage, founderEmail,
+          teamSizeNeeded: teamSizeNeeded || teamSize || null,
+          createdAt: new Date(), status: "pending",
         });
         res.json(result);
       } catch (err) {
-        res.status(400).json({ error: "Invalid ID" });
-      }
-    });
-
-    // Get opportunities by founder email
-    app.get("/api/opportunities/:email", async (req, res) => {
-      const { email } = req.params;
-      const result = await opportunitiesCollection
-        .find({ founderEmail: email })
-        .toArray();
-      res.json(result);
-    });
-
-    // Update an opportunity
-    app.patch("/api/opportunities/:id", async (req, res) => {
-      const { id } = req.params;
-      const data = req.body;
-      try {
-        const result = await opportunitiesCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { ...data } },
-        );
-        res.json(result);
-      } catch (err) {
-        res.status(400).json({ error: "Invalid ID" });
-      }
-    });
-
-    // Delete an opportunity
-    app.delete("/api/opportunities/:id", async (req, res) => {
-      const { id } = req.params;
-      try {
-        const result = await opportunitiesCollection.deleteOne({
-          _id: new ObjectId(id),
-        });
-        res.json(result);
-      } catch (err) {
-        res.status(400).json({ error: "Invalid ID" });
-      }
-    });
-
-    // Submit an application
-    app.post("/api/applications", async (req, res) => {
-      const data = req.body;
-      console.log("[POST /api/applications] Received:", data);
-      const result = await applicationsCollection.insertOne({
-        ...data,
-        createdAt: new Date(),
-        status: "pending",
-      });
-      console.log("[POST /api/applications] Inserted:", result.insertedId);
-      res.json(result);
-    });
-
-    // Get all applications for a founder (by founder email)
-    app.get("/api/applications/founder/:email", async (req, res) => {
-      const { email } = req.params;
-      console.log("[GET /api/applications/founder] email:", email);
-      const result = await applicationsCollection
-        .find({ founderEmail: email })
-        .sort({ createdAt: -1 })
-        .toArray();
-      console.log("[GET /api/applications/founder] found:", result.length);
-      res.json(result);
-    });
-
-    // Get all applications for an applicant (by applicant email)
-    app.get("/api/applications/applicant/:email", async (req, res) => {
-      const { email } = req.params;
-      console.log("[GET /api/applications/applicant] email:", email);
-      const result = await applicationsCollection
-        .find({ applicantEmail: email })
-        .sort({ createdAt: -1 })
-        .toArray();
-      console.log("[GET /api/applications/applicant] found:", result.length);
-      res.json(result);
-    });
-
-    // Update application status (Accept / Reject)
-    app.patch("/api/applications/:id", async (req, res) => {
-      const { id } = req.params;
-      const { status } = req.body;
-      try {
-        const result = await applicationsCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { status } },
-        );
-        res.json(result);
-      } catch (err) {
-        res.status(400).json({ error: "Invalid ID" });
-      }
-    });
-
-    app.patch("/api/users/upgrade-premium/:email", async (req, res) => {
-      try {
-        const { email } = req.params;
-        const { transactionId, paymentStatus, paymentType, amount, userEmail } =
-          req.body;
-
-        console.log("[upgrade-premium] email:", email, "body:", req.body);
-
-        // Update user isPremium
-        const userUpdate = await usersCollection.updateOne(
-          { email },
-          { $set: { isPremium: true, premiumSince: new Date() } },
-        );
-
-        console.log(
-          "[upgrade-premium] user matched:",
-          userUpdate.matchedCount,
-          "modified:",
-          userUpdate.modifiedCount,
-        );
-
-        // Save to payments collection
-        const paymentRecord = {
-          userEmail: userEmail || email,
-          transactionId,
-          paymentStatus,
-          paymentType,
-          amount,
-          paidAt: new Date(),
-        };
-        await paymentCollection.insertOne(paymentRecord);
-
-        res.json({ success: true, userUpdate, paymentRecord });
-      } catch (err) {
-        console.error("[upgrade-premium] error:", err);
         res.status(500).json({ error: err.message });
       }
     });
 
-    // Admin overview stats
-    app.get("/api/admin/stats", async (req, res) => {
+    // Founder: update startup
+    app.patch("/api/founder/:id", verifyToken, async (req, res) => {
+      try {
+        const { startupName, logoUrl, industry, description, fundingStage, founderEmail, teamSize, teamSizeNeeded } = req.body;
+        const result = await startupsCollection.updateOne(
+          { _id: new ObjectId(req.params.id) },
+          { $set: { startupName, logoUrl, industry, description, fundingStage, founderEmail, teamSizeNeeded: teamSizeNeeded || teamSize || null } }
+        );
+        res.json(result);
+      } catch {
+        res.status(400).json({ error: "Invalid ID" });
+      }
+    });
+
+    // Founder: delete startup
+    app.delete("/api/founder/:id", verifyToken, async (req, res) => {
+      try {
+        res.json(await startupsCollection.deleteOne({ _id: new ObjectId(req.params.id) }));
+      } catch {
+        res.status(400).json({ error: "Invalid ID" });
+      }
+    });
+
+    // Opportunities: post (founder only)
+    app.post("/api/opportunities", verifyToken, async (req, res) => {
+      const data = req.body;
+      const user = await usersCollection.findOne({ email: data?.founderEmail });
+      const count = await opportunitiesCollection.countDocuments({ founderEmail: data?.founderEmail });
+      if (!user?.isPremium && count >= 3) {
+        return res.status(403).json({ message: "Your free limit is over. Upgrade to premium to post more opportunities." });
+      }
+      res.json(await opportunitiesCollection.insertOne({ ...data }));
+    });
+
+    // Opportunities: by founder email
+    app.get("/api/opportunities/:email", verifyToken, async (req, res) => {
+      res.json(await opportunitiesCollection.find({ founderEmail: req.params.email }).toArray());
+    });
+
+    // Opportunities: update
+    app.patch("/api/opportunities/:id", verifyToken, async (req, res) => {
+      try {
+        res.json(await opportunitiesCollection.updateOne({ _id: new ObjectId(req.params.id) }, { $set: { ...req.body } }));
+      } catch {
+        res.status(400).json({ error: "Invalid ID" });
+      }
+    });
+
+    // Opportunities: delete
+    app.delete("/api/opportunities/:id", verifyToken, async (req, res) => {
+      try {
+        res.json(await opportunitiesCollection.deleteOne({ _id: new ObjectId(req.params.id) }));
+      } catch {
+        res.status(400).json({ error: "Invalid ID" });
+      }
+    });
+
+    // Applications: submit
+    app.post("/api/applications", verifyToken, async (req, res) => {
+      res.json(await applicationsCollection.insertOne({ ...req.body, createdAt: new Date(), status: "pending" }));
+    });
+
+    // Applications: by founder
+    app.get("/api/applications/founder/:email", verifyToken, async (req, res) => {
+      res.json(await applicationsCollection.find({ founderEmail: req.params.email }).sort({ createdAt: -1 }).toArray());
+    });
+
+    // Applications: by applicant
+    app.get("/api/applications/applicant/:email", verifyToken, async (req, res) => {
+      res.json(await applicationsCollection.find({ applicantEmail: req.params.email }).sort({ createdAt: -1 }).toArray());
+    });
+
+    // Applications: update status
+    app.patch("/api/applications/:id", verifyToken, async (req, res) => {
+      try {
+        res.json(await applicationsCollection.updateOne({ _id: new ObjectId(req.params.id) }, { $set: { status: req.body.status } }));
+      } catch {
+        res.status(400).json({ error: "Invalid ID" });
+      }
+    });
+
+    // Premium upgrade
+    app.patch("/api/users/upgrade-premium/:email", verifyToken, async (req, res) => {
+      try {
+        const { email } = req.params;
+        const { transactionId, paymentStatus, paymentType, amount, userEmail } = req.body;
+        const userUpdate = await usersCollection.updateOne({ email }, { $set: { isPremium: true, premiumSince: new Date() } });
+        const paymentRecord = { userEmail: userEmail || email, transactionId, paymentStatus, paymentType, amount, paidAt: new Date() };
+        await paymentCollection.insertOne(paymentRecord);
+        res.json({ success: true, userUpdate, paymentRecord });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // User profile: get
+    app.get("/api/users/profile/:email", verifyToken, async (req, res) => {
+      const user = await usersCollection.findOne({ email: req.params.email }, { projection: { name: 1, email: 1, image: 1, skills: 1, bio: 1 } });
+      res.json(user);
+    });
+
+    // User profile: update
+    app.patch("/api/users/profile/:email", verifyToken, async (req, res) => {
+      const { name, image, skills, bio } = req.body;
+      const updateData = {};
+      if (name !== undefined) updateData.name = name;
+      if (image !== undefined) updateData.image = image;
+      if (skills !== undefined) updateData.skills = skills;
+      if (bio !== undefined) updateData.bio = bio;
+      res.json(await usersCollection.updateOne({ email: req.params.email }, { $set: updateData }));
+    });
+
+    // ADMIN ROUTES require JWT and admin role 
+
+    app.get("/api/admin/stats", verifyToken, verifyAdmin, async (req, res) => {
       try {
         const [totalUsers, totalStartups, totalOpportunities, payments] = await Promise.all([
           usersCollection.countDocuments(),
@@ -387,105 +309,60 @@ async function run() {
       }
     });
 
-    // Admin: get all users
-    app.get("/api/admin/users", async (req, res) => {
+    app.get("/api/admin/users", verifyToken, verifyAdmin, async (req, res) => {
       try {
-        const users = await usersCollection.find({}, {
-          projection: { name: 1, email: 1, image: 1, role: 1, isPremium: 1, createdAt: 1 }
-        }).sort({ createdAt: -1 }).toArray();
-        res.json(users);
+        res.json(await usersCollection.find({}, { projection: { name: 1, email: 1, image: 1, role: 1, isPremium: 1, createdAt: 1 } }).sort({ createdAt: -1 }).toArray());
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
     });
 
-    // Admin: block user
-    app.patch("/api/admin/users/block/:id", async (req, res) => {
+    app.patch("/api/admin/users/block/:id", verifyToken, verifyAdmin, async (req, res) => {
       try {
-        const result = await usersCollection.updateOne(
-          { _id: new ObjectId(req.params.id) },
-          { $set: { isBlocked: true } }
-        );
-        res.json(result);
+        res.json(await usersCollection.updateOne({ _id: new ObjectId(req.params.id) }, { $set: { isBlocked: true } }));
       } catch (err) {
         res.status(400).json({ error: err.message });
       }
     });
 
-    // Admin: unblock user
-    app.patch("/api/admin/users/unblock/:id", async (req, res) => {
+    app.patch("/api/admin/users/unblock/:id", verifyToken, verifyAdmin, async (req, res) => {
       try {
-        const result = await usersCollection.updateOne(
-          { _id: new ObjectId(req.params.id) },
-          { $set: { isBlocked: false } }
-        );
-        res.json(result);
+        res.json(await usersCollection.updateOne({ _id: new ObjectId(req.params.id) }, { $set: { isBlocked: false } }));
       } catch (err) {
         res.status(400).json({ error: err.message });
       }
     });
 
-    // Admin: get all startups (real collection only)
-    app.get("/api/admin/startups", async (req, res) => {
+    app.get("/api/admin/startups", verifyToken, verifyAdmin, async (req, res) => {
       try {
-        const startups = await startupsCollection.find({}).sort({ createdAt: -1 }).toArray();
-        res.json(startups);
+        res.json(await startupsCollection.find({}).sort({ createdAt: -1 }).toArray());
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
     });
 
-    // Admin: approve startup
-    app.patch("/api/admin/startups/approve/:id", async (req, res) => {
+    app.patch("/api/admin/startups/approve/:id", verifyToken, verifyAdmin, async (req, res) => {
       try {
-        const result = await startupsCollection.updateOne(
-          { _id: new ObjectId(req.params.id) },
-          { $set: { approved: true } }
-        );
-        res.json(result);
+        res.json(await startupsCollection.updateOne({ _id: new ObjectId(req.params.id) }, { $set: { approved: true } }));
       } catch (err) {
         res.status(400).json({ error: err.message });
       }
     });
 
-    // Admin: remove startup
-    app.delete("/api/admin/startups/:id", async (req, res) => {
+    app.delete("/api/admin/startups/:id", verifyToken, verifyAdmin, async (req, res) => {
       try {
-        const result = await startupsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
-        res.json(result);
+        res.json(await startupsCollection.deleteOne({ _id: new ObjectId(req.params.id) }));
       } catch (err) {
         res.status(400).json({ error: err.message });
       }
     });
 
-    // Admin: get all transactions
-    app.get("/api/admin/transactions", async (req, res) => {
+    app.get("/api/admin/transactions", verifyToken, verifyAdmin, async (req, res) => {
       try {
-        const transactions = await paymentCollection.find({}).sort({ paidAt: -1 }).toArray();
-        res.json(transactions);
+        res.json(await paymentCollection.find({}).sort({ paidAt: -1 }).toArray());
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
-    });
-
-    // Get user profile by email
-    app.get("/api/users/profile/:email", async (req, res) => {
-      const { email } = req.params;
-      const user = await usersCollection.findOne({ email }, { projection: { name: 1, email: 1, image: 1, skills: 1, bio: 1 } });
-      res.json(user);
-    });
-
-    // Update user profile (name, image, skills, bio)
-    app.patch("/api/users/profile/:email", async (req, res) => {
-      const { email } = req.params;
-      const { name, image, skills, bio } = req.body;
-      const updateData = {};
-      if (name !== undefined) updateData.name = name;
-      if (image !== undefined) updateData.image = image;
-      if (skills !== undefined) updateData.skills = skills;
-      if (bio !== undefined) updateData.bio = bio;
-      const result = await usersCollection.updateOne({ email }, { $set: updateData });
-      res.json(result);
     });
 
     console.log("Connected to MongoDB successfully!");
