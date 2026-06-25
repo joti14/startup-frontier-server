@@ -373,6 +373,39 @@ async function run() {
 
 run().catch(console.dir);
 
+// ─── STRIPE CHECKOUT ──────────────────────────────────────────────────────────
+const Stripe = require("stripe");
+
+app.post("/api/create-checkout-session", async (req, res) => {
+  try {
+    const { userEmail, origin } = req.body;
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+    const session = await stripe.checkout.sessions.create({
+      customer_email: userEmail,
+      line_items: [{ price: "price_1Tm50l1M1Z0gAaXRyn6q5twY", quantity: 1 }],
+      mode: "subscription",
+      success_url: `${origin}/dashboard/founder/premium-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/cancel?session_id={CHECKOUT_SESSION_ID}`,
+    });
+    res.json({ url: session.url });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+app.post("/api/retrieve-checkout-session", async (req, res) => {
+  try {
+    const { session_id } = req.body;
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+    const session = await stripe.checkout.sessions.retrieve(session_id, {
+      expand: ["line_items", "payment_intent"],
+    });
+    res.json(session);
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
 app.get("/", (req, res) => {
   res.send("Startup Frontier API is running!");
 });
