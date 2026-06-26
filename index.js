@@ -265,7 +265,7 @@ async function run() {
     });
 
     // Premium upgrade
-    app.patch("/api/users/upgrade-premium/:email", verifyToken, async (req, res) => {
+    app.patch("/api/users/upgrade-premium/:email", async (req, res) => {
       try {
         const { email } = req.params;
         const { transactionId, paymentStatus, paymentType, amount, userEmail } = req.body;
