@@ -280,7 +280,7 @@ async function run() {
 
     // User profile: get
     app.get("/api/users/profile/:email", verifyToken, async (req, res) => {
-      const user = await usersCollection.findOne({ email: req.params.email }, { projection: { name: 1, email: 1, image: 1, skills: 1, bio: 1 } });
+      const user = await usersCollection.findOne({ email: req.params.email }, { projection: { name: 1, email: 1, image: 1, skills: 1, bio: 1, isPremium: 1, role: 1 } });
       res.json(user);
     });
 
